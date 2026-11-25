@@ -1,0 +1,132 @@
+### =====================================================================
+### EnerDeFi mock providers: test control panel
+### Works with the VS Code "REST Client" extension and Visual Studio 2022 (17.12+).
+### In JetBrains Rider, everything works except the automatic @jobId; paste a job id in by hand.
+### Start the mocks first:  dotnet run --project providers/MockProviders
+### =====================================================================
+
+@admin = http://localhost:5100
+
+
+### ---------------------------------------------------------------------
+### Overview and status
+### ---------------------------------------------------------------------
+
+### What the control panel offers
+GET {{admin}}/
+
+### Mode and call count of each provider (compare call counts to see where your API routed checks)
+GET {{admin}}/admin/status
+
+
+### ---------------------------------------------------------------------
+### QuickVerify modes
+### ---------------------------------------------------------------------
+
+### QuickVerify: Normal (default: ~30% failures, ~10% slow)
+PUT {{admin}}/admin/quickverify/mode/Normal
+
+### QuickVerify: Healthy (never fails, never slow)
+PUT {{admin}}/admin/quickverify/mode/Healthy
+
+### QuickVerify: Slow (every response takes 5 seconds)
+PUT {{admin}}/admin/quickverify/mode/Slow
+
+### QuickVerify: Down (every request returns 503)
+PUT {{admin}}/admin/quickverify/mode/Down
+
+
+### ---------------------------------------------------------------------
+### SureCheck modes
+### ---------------------------------------------------------------------
+
+### SureCheck: Normal
+PUT {{admin}}/admin/surecheck/mode/Normal
+
+### SureCheck: Healthy
+PUT {{admin}}/admin/surecheck/mode/Healthy
+
+### SureCheck: Slow
+PUT {{admin}}/admin/surecheck/mode/Slow
+
+### SureCheck: Down
+PUT {{admin}}/admin/surecheck/mode/Down
+
+
+### ---------------------------------------------------------------------
+### TrustLink modes
+### ---------------------------------------------------------------------
+
+### TrustLink: Normal (~10% submit failures, webhooks in 3-10 s, ~15% duplicates, ~10% "issuer unavailable")
+PUT {{admin}}/admin/trustlink/mode/Normal
+
+### TrustLink: Healthy (no failures, webhooks in 2-4 s, no duplicates)
+PUT {{admin}}/admin/trustlink/mode/Healthy
+
+### TrustLink: Slow (webhooks take 30 seconds)
+PUT {{admin}}/admin/trustlink/mode/Slow
+
+### TrustLink: Down (submissions return 503)
+PUT {{admin}}/admin/trustlink/mode/Down
+
+
+### ---------------------------------------------------------------------
+### Scenarios
+### ---------------------------------------------------------------------
+
+### Scenario: everything healthy (run all three)
+PUT {{admin}}/admin/quickverify/mode/Healthy
+
+###
+PUT {{admin}}/admin/surecheck/mode/Healthy
+
+###
+PUT {{admin}}/admin/trustlink/mode/Healthy
+
+### Scenario: primary outage. QuickVerify down; checks should still complete elsewhere
+PUT {{admin}}/admin/quickverify/mode/Down
+
+### Scenario: async provider outage. TrustLink down; what does the candidate's API do?
+PUT {{admin}}/admin/trustlink/mode/Down
+
+### Scenario: total outage (run all three). Project should stay unverified with a clear "try later" response
+PUT {{admin}}/admin/quickverify/mode/Down
+
+###
+PUT {{admin}}/admin/surecheck/mode/Down
+
+###
+PUT {{admin}}/admin/trustlink/mode/Down
+
+### Scenario: reset everything to Normal (run all three)
+PUT {{admin}}/admin/quickverify/mode/Normal
+
+###
+PUT {{admin}}/admin/surecheck/mode/Normal
+
+###
+PUT {{admin}}/admin/trustlink/mode/Normal
+
+
+### ---------------------------------------------------------------------
+### TrustLink webhooks
+### Trigger a verification through the candidate's API first, so there is a webhook to work with.
+### ---------------------------------------------------------------------
+
+### Recent webhook deliveries (newest first) and how the candidate's API responded.
+### Look for kind = "duplicate" and check each event was only processed once.
+# @name deliveries
+GET {{admin}}/admin/trustlink/webhooks
+
+### The TrustLink job id from the newest delivery above (run "deliveries" first).
+### To target a different job, replace the value with any trustLinkJobId from the list.
+@jobId = {{deliveries.response.body.$[0].trustLinkJobId}}
+
+### Forged webhook: same payload, signature made with the wrong secret.
+### Expect responseStatus 401 or 403, and the project must not change.
+POST {{admin}}/admin/trustlink/webhooks/{{jobId}}/forged
+
+### Replay: re-sends the last delivery with its ORIGINAL timestamp and signature.
+### Within 5 minutes of the original: accepted, but must not be processed twice.
+### After 5 minutes: should be rejected as stale.
+POST {{admin}}/admin/trustlink/webhooks/{{jobId}}/replay
